@@ -78,9 +78,13 @@ export async function loadInvites() {
 
             console.log(`🔍 Revisando grupo: ${groupId} (${groupData.name || 'Sin nombre'})`);
 
-            const invitesSnap = await getDocs(
-                collection(db, "groups", groupId, "invites")
+            const invitesQuery = query(
+                collection(db, "groups", groupId, "invites"),
+                where("email", "==", userEmail),
+                where("status", "==", "pending")
             );
+
+            const invitesSnap = await getDocs(invitesQuery);
 
             console.log(`  📧 Invitaciones en este grupo: ${invitesSnap.docs.length}`);
 
