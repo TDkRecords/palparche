@@ -3,180 +3,171 @@ import { auth, db } from "$lib/js/firebase";
 import {
     doc,
     getDoc,
+    getDocs,
     setDoc,
     addDoc,
-    getDocs,
+    updateDoc,
     collection,
     serverTimestamp,
-    updateDoc,
     query,
     where
 } from "firebase/firestore";
 
-export async function sendInvite(email) {
-    const user = auth.currentUser;
-    if (!user) {
-        console.error("❌ No hay usuario autenticado");
-        return;
-    }
 
-    console.log("📤 Enviando invitación a:", email);
-    console.log("👤 Usuario actual:", user.email);
+/* =========================
+   ENVIAR INVITACIÓN
+========================= */
+
+export async function sendInvite(email) {
+
+    const user = auth.currentUser;
+    if (!user) throw new Error("User not authenticated");
+
+    const normalizedEmail = email.toLowerCase().trim();
 
     const userSnap = await getDoc(doc(db, "users", user.uid));
-    const userData = userSnap.data();
+    const groupId = userSnap.data()?.currentGroupId;
 
-    console.log("📄 Datos del usuario:", userData);
+    if (!groupId) throw new Error("User has no group");
 
-    const groupId = userData?.currentGroupId;
 
-    if (!groupId) {
-        console.error("❌ Usuario no tiene grupo");
-        throw new Error("No group");
-    }
+    /* buscar uid del email */
 
-    console.log("🏢 ID del grupo:", groupId);
-
-    const inviteData = {
-        email: email.toLowerCase().trim(), // ✅ Normalizar email
-        invitedBy: user.uid,
-        invitedByEmail: user.email, // ✅ Guardar email de quien invita
-        status: "pending",
-        createdAt: serverTimestamp()
-    };
-
-    console.log("💾 Guardando invitación:", inviteData);
-
-    const inviteRef = await addDoc(
-        collection(db, "groups", groupId, "invites"),
-        inviteData
+    const emailSnap = await getDoc(
+        doc(db, "emails", normalizedEmail)
     );
 
-    console.log("✅ Invitación guardada con ID:", inviteRef.id);
+    if (!emailSnap.exists()) {
+        throw new Error("User not found");
+    }
+
+    const invitedUid = emailSnap.data().uid;
+
+
+    /* evitar invitación duplicada */
+
+    const invitesSnap = await getDocs(
+        collection(db, "users", invitedUid, "invites")
+    );
+
+    const alreadyInvited = invitesSnap.docs.find(
+        d => d.data().groupId === groupId && d.data().status === "pending"
+    );
+
+    if (alreadyInvited) {
+        throw new Error("User already invited");
+    }
+
+
+    /* obtener nombre del grupo */
+
+    const groupSnap = await getDoc(
+        doc(db, "groups", groupId)
+    );
+
+    const groupName = groupSnap.data()?.name ?? "Grupo";
+
+
+    /* crear invitación */
+
+    await addDoc(
+        collection(db, "users", invitedUid, "invites"),
+        {
+            groupId,
+            groupName,
+            invitedBy: user.uid,
+            invitedByEmail: user.email,
+            status: "pending",
+            createdAt: serverTimestamp()
+        }
+    );
+
 }
+
+
+
+/* =========================
+   CARGAR INVITACIONES
+========================= */
 
 export async function loadInvites() {
+
     const user = auth.currentUser;
-    if (!user) {
-        console.log("❌ No hay usuario para cargar invitaciones");
-        return [];
-    }
+    if (!user) return [];
 
-    console.log("🔍 Buscando invitaciones para:", user.email);
+    const q = query(
+        collection(db, "users", user.uid, "invites"),
+        where("status", "==", "pending")
+    );
 
-    const userEmail = user.email.toLowerCase().trim();
+    const snap = await getDocs(q);
 
-    try {
-        const groupsSnap = await getDocs(collection(db, "groups"));
-        console.log("📊 Total de grupos encontrados:", groupsSnap.docs.length);
+    return snap.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+    }));
 
-        let invites = [];
-
-        for (const groupDoc of groupsSnap.docs) {
-            const groupId = groupDoc.id;
-            const groupData = groupDoc.data();
-
-            console.log(`🔍 Revisando grupo: ${groupId} (${groupData.name || 'Sin nombre'})`);
-
-            const invitesQuery = query(
-                collection(db, "groups", groupId, "invites"),
-                where("email", "==", userEmail),
-                where("status", "==", "pending")
-            );
-
-            const invitesSnap = await getDocs(invitesQuery);
-
-            console.log(`  📧 Invitaciones en este grupo: ${invitesSnap.docs.length}`);
-
-            invitesSnap.forEach(inviteDoc => {
-                const data = inviteDoc.data();
-
-                console.log(`    📩 Invitación:`, {
-                    id: inviteDoc.id,
-                    email: data.email,
-                    status: data.status,
-                    invitedBy: data.invitedByEmail || data.invitedBy
-                });
-
-                const inviteEmail = data.email?.toLowerCase().trim();
-
-                if (inviteEmail === userEmail && data.status === "pending") {
-                    console.log("    ✅ MATCH! Esta invitación es para el usuario actual");
-
-                    invites.push({
-                        id: inviteDoc.id,
-                        groupId: groupId,
-                        groupName: groupData.name || "Grupo sin nombre",
-                        ...data
-                    });
-                } else {
-                    console.log(`    ⏭️  No match: email=${inviteEmail} vs ${userEmail}, status=${data.status}`);
-                }
-            });
-        }
-
-        console.log("📬 Total de invitaciones pendientes:", invites.length);
-        console.log("📋 Invitaciones:", invites);
-
-        return invites;
-    } catch (error) {
-        console.error("❌ Error cargando invitaciones:", error);
-        return [];
-    }
 }
+
+
+
+/* =========================
+   ACEPTAR INVITACIÓN
+========================= */
 
 export async function acceptInvite(invite) {
+
     const user = auth.currentUser;
+    if (!user) throw new Error("User not authenticated");
 
-    console.log("✅ Aceptando invitación:", invite);
 
-    try {
-        // 1. Agregar usuario como miembro del grupo
-        await setDoc(
-            doc(db, "groups", invite.groupId, "members", user.uid),
-            {
-                role: "member",
-                joinedAt: serverTimestamp()
-            }
-        );
-        console.log("✅ Usuario agregado como miembro");
+    await setDoc(
+        doc(db, "groups", invite.groupId, "members", user.uid),
+        {
+            name: user.displayName ?? "Usuario",
+            email: user.email,
+            photo: user.photoURL ?? null,
+            role: "member",
+            joinedAt: serverTimestamp()
+        }
+    );
 
-        // 2. Actualizar currentGroupId del usuario
-        await updateDoc(doc(db, "users", user.uid), {
+
+    await updateDoc(
+        doc(db, "users", user.uid),
+        {
             currentGroupId: invite.groupId
-        });
-        console.log("✅ currentGroupId actualizado");
+        }
+    );
 
-        // 3. Marcar invitación como aceptada
-        await updateDoc(
-            doc(db, "groups", invite.groupId, "invites", invite.id),
-            {
-                status: "accepted",
-                acceptedAt: serverTimestamp()
-            }
-        );
-        console.log("✅ Invitación marcada como aceptada");
 
-    } catch (error) {
-        console.error("❌ Error aceptando invitación:", error);
-        throw error;
-    }
+    await updateDoc(
+        doc(db, "users", user.uid, "invites", invite.id),
+        {
+            status: "accepted",
+            acceptedAt: serverTimestamp()
+        }
+    );
+
 }
 
-export async function rejectInvite(invite) {
-    console.log("❌ Rechazando invitación:", invite);
 
-    try {
-        await updateDoc(
-            doc(db, "groups", invite.groupId, "invites", invite.id),
-            {
-                status: "rejected",
-                rejectedAt: serverTimestamp()
-            }
-        );
-        console.log("✅ Invitación rechazada");
-    } catch (error) {
-        console.error("❌ Error rechazando invitación:", error);
-        throw error;
-    }
+
+/* =========================
+   RECHAZAR INVITACIÓN
+========================= */
+
+export async function rejectInvite(invite) {
+
+    const user = auth.currentUser;
+    if (!user) throw new Error("User not authenticated");
+
+    await updateDoc(
+        doc(db, "users", user.uid, "invites", invite.id),
+        {
+            status: "rejected",
+            rejectedAt: serverTimestamp()
+        }
+    );
+
 }

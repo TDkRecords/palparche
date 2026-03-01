@@ -219,22 +219,6 @@
                         </div>
 
                         <div class="flex justify-between items-start">
-                            <span class="text-gray-500">UID:</span>
-                            <span
-                                class="font-mono text-xs text-gray-600 text-right break-all max-w-[60%]"
-                            >
-                                {user.uid}
-                            </span>
-                        </div>
-
-                        <div class="flex justify-between items-start">
-                            <span class="text-gray-500">Cuenta creada:</span>
-                            <span class="font-medium text-gray-800 text-right">
-                                {formatDate(userData?.createdAt)}
-                            </span>
-                        </div>
-
-                        <div class="flex justify-between items-start">
                             <span class="text-gray-500">Verificado:</span>
                             <span class="font-medium text-gray-800">
                                 {#if user.emailVerified}
@@ -314,15 +298,6 @@
                                     class="font-medium text-gray-800 text-right"
                                 >
                                     {formatDate(groupData?.createdAt)}
-                                </span>
-                            </div>
-
-                            <div class="flex justify-between items-start">
-                                <span class="text-gray-500">ID del grupo:</span>
-                                <span
-                                    class="font-mono text-xs text-gray-600 text-right break-all max-w-[60%]"
-                                >
-                                    {groupData.id}
                                 </span>
                             </div>
                         </div>

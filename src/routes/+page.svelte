@@ -35,15 +35,24 @@
             const userRef = doc(db, "users", user.uid);
             const userSnap = await getDoc(userRef);
 
-            if (!userSnap.exists()) {
-                // Crear documento solo si no existe
-                await setDoc(userRef, {
-                    displayName: user.displayName,
+            // Crear/actualizar documento de usuario
+            await setDoc(
+                doc(db, "users", user.uid),
+                {
+                    name: user.displayName,
                     email: user.email,
-                    photoURL: user.photoURL,
-                    createdAt: serverTimestamp(),
-                });
-            }
+                    photo: user.photoURL,
+                    currentGroupId: userSnap.exists()
+                        ? userSnap.data().currentGroupId
+                        : null,
+                },
+                { merge: true },
+            );
+
+            // Siempre crear mapeo email → uid para invitaciones
+            await setDoc(doc(db, "emails", user.email.toLowerCase()), {
+                uid: user.uid,
+            });
 
             goto("/home");
         } catch (error) {
